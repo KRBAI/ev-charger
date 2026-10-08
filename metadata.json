@@ -1,0 +1,6 @@
+{
+  "name": "EV ChargeAdmin - OCPP 1.6-J Cloud Console",
+  "description": "Production-grade EV Charging Network Administrative Dashboard integrated with Google Cloud Firestore and Python OCPP 1.6-J servers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
