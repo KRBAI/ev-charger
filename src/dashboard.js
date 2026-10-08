@@ -23,12 +23,13 @@ import {
 // 1. Firebase Configuration (Preset: orel-ev-30759)
 // -------------------------------------------------------------
 const DEFAULT_CONFIG = {
-  apiKey: "AIzaSyDummyKeyForPresetOrelEvConfig30759",
+  apiKey: "AIzaSyBHctG83GjkrxsaAVsAOOQQI9BjuJS-0P8",
   authDomain: "orel-ev-30759.firebaseapp.com",
   projectId: "orel-ev-30759",
-  storageBucket: "orel-ev-30759.appspot.com",
-  messagingSenderId: "102938475610",
-  appId: "1:102938475610:web:8a9b7c6d5e4f3a2b1c0d"
+  storageBucket: "orel-ev-30759.firebasestorage.app",
+  messagingSenderId: "343235419280",
+  appId: "1:343235419280:web:414d1ddc89a47c71c08c15",
+  measurementId: "G-YZ13FTYW2M"
 };
 
 const savedConfigStr = localStorage.getItem('ev_firebase_config');
@@ -42,11 +43,13 @@ let chargersUnsub = null;
 let usersUnsub = null;
 let commandsUnsub = null;
 let transactionsUnsub = null;
+let recentSwipesUnsub = null;
 
 let chargersData = [];
 let usersData = [];
 let commandsData = [];
 let transactionsData = [];
+let recentSwipesData = [];
 
 // UI Renderer Delegation
 export const ui = {
@@ -54,6 +57,7 @@ export const ui = {
   renderUsers: () => {},
   renderCommands: () => {},
   renderTransactions: () => {},
+  renderRecentSwipes: () => {},
   renderStats: () => {}
 };
 
@@ -63,6 +67,7 @@ export function registerUIRenderers(renderers) {
   if (typeof ui.renderUsers === 'function') ui.renderUsers();
   if (typeof ui.renderCommands === 'function') ui.renderCommands();
   if (typeof ui.renderTransactions === 'function') ui.renderTransactions();
+  if (typeof ui.renderRecentSwipes === 'function') ui.renderRecentSwipes();
   if (typeof ui.renderStats === 'function') ui.renderStats();
 }
 
@@ -70,6 +75,7 @@ function renderChargers() { if (ui.renderChargers) ui.renderChargers(); }
 function renderUsers() { if (ui.renderUsers) ui.renderUsers(); }
 function renderCommands() { if (ui.renderCommands) ui.renderCommands(); }
 function renderTransactions() { if (ui.renderTransactions) ui.renderTransactions(); }
+function renderRecentSwipes() { if (ui.renderRecentSwipes) ui.renderRecentSwipes(); }
 function renderStats() { if (ui.renderStats) ui.renderStats(); }
 
 // Fallback Mock Data for immediate zero-friction preview & offline hardware testing
@@ -78,44 +84,64 @@ const MOCK_CHARGERS = [
     id: "DefaultOrelCharger",
     vendor: "ABB E-Mobility",
     model: "Terra 54 CJG",
+    serial_number: "ABB-TERRA-2024-001",
+    firmware_version: "2.4.1",
     status: "Available",
     connected: true,
     last_heartbeat: new Date(Date.now() - 25000),
     last_updated: new Date(Date.now() - 25000),
     current_power_kw: 0.0,
+    voltage_v: 400.0,
+    current_a: 0.0,
+    soc_percent: null,
     active_transaction_id: null
   },
   {
     id: "OREL-DC-FAST-02",
     vendor: "Tritium",
     model: "Veefil-RT 50kW",
+    serial_number: "TRIT-VF-88219",
+    firmware_version: "3.1.0",
     status: "Charging",
     connected: true,
     last_heartbeat: new Date(Date.now() - 8000),
     last_updated: new Date(Date.now() - 4000),
     current_power_kw: 48.6,
+    voltage_v: 405.2,
+    current_a: 120.0,
+    soc_percent: 78,
     active_transaction_id: "TX-90412"
   },
   {
     id: "OREL-AC-HUB-03",
     vendor: "Schneider Electric",
     model: "EVlink Pro AC 22kW",
+    serial_number: "SCHN-EV-99014",
+    firmware_version: "1.9.4",
     status: "Preparing",
     connected: true,
     last_heartbeat: new Date(Date.now() - 15000),
     last_updated: new Date(Date.now() - 15000),
     current_power_kw: 0.0,
+    voltage_v: 230.5,
+    current_a: 0.0,
+    soc_percent: 42,
     active_transaction_id: null
   },
   {
     id: "OREL-DEPOT-04",
     vendor: "Siemens",
     model: "VersiCharge SG",
+    serial_number: "SIEM-VC-10022",
+    firmware_version: "2.0.8",
     status: "Faulted",
     connected: false,
     last_heartbeat: new Date(Date.now() - 3600000),
     last_updated: new Date(Date.now() - 3600000),
     current_power_kw: 0.0,
+    voltage_v: 0.0,
+    current_a: 0.0,
+    soc_percent: null,
     active_transaction_id: null
   }
 ];
@@ -174,6 +200,8 @@ const MOCK_TRANSACTIONS = [
     id: "TX-90412",
     charger_id: "OREL-DC-FAST-02",
     id_tag: "04A1B2C3D4",
+    user_name: "Alex Sterling",
+    stop_reason: "Charging",
     start_time: new Date(Date.now() - 1200000),
     stop_time: null,
     meter_start: 1420.5,
@@ -184,11 +212,28 @@ const MOCK_TRANSACTIONS = [
     id: "TX-90408",
     charger_id: "DefaultOrelCharger",
     id_tag: "E200001928",
+    user_name: "Devon Vance",
+    stop_reason: "EVDisconnected",
     start_time: new Date(Date.now() - 18000000),
     stop_time: new Date(Date.now() - 15200000),
     meter_start: 890.0,
     meter_stop: 924.5,
     total_kwh: 34.5
+  }
+];
+
+const MOCK_RECENT_SWIPES = [
+  {
+    id: "swipe-1",
+    rfid_tag: "93D4B81A",
+    charger_id: "DefaultOrelCharger",
+    timestamp: new Date(Date.now() - 45000)
+  },
+  {
+    id: "swipe-2",
+    rfid_tag: "04FA88C2",
+    charger_id: "OREL-DC-FAST-02",
+    timestamp: new Date(Date.now() - 180000)
   }
 ];
 
@@ -278,6 +323,7 @@ function enableSimulatedMode(reason = '') {
   usersData = [...MOCK_USERS];
   commandsData = [...MOCK_COMMANDS];
   transactionsData = [...MOCK_TRANSACTIONS];
+  recentSwipesData = [...MOCK_RECENT_SWIPES];
 
   updateConnectionStatus('simulated', 'Simulated OCPP Network (Click to configure live Firestore)');
   const alertBanner = document.getElementById('connection-alert-banner');
@@ -293,6 +339,7 @@ function enableSimulatedMode(reason = '') {
   renderUsers();
   renderCommands();
   renderTransactions();
+  renderRecentSwipes();
   renderStats();
 }
 
@@ -364,6 +411,26 @@ function attachFirestoreListeners() {
       renderStats();
     }, (err) => {
       console.warn("Transactions snapshot notice:", err.message);
+    });
+  } catch (e) {}
+
+  // 5. RecentSwipes Listener (Live Unknown RFID Taps)
+  try {
+    const swipesCol = collection(db, 'RecentSwipes');
+    const swipesQuery = query(swipesCol, orderBy('timestamp', 'desc'), limit(15));
+    recentSwipesUnsub = onSnapshot(swipesQuery, (snapshot) => {
+      recentSwipesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      renderRecentSwipes();
+    }, (err) => {
+      onSnapshot(swipesCol, (snap) => {
+        recentSwipesData = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => {
+            const tA = a.timestamp?.toDate ? a.timestamp.toDate().getTime() : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+            const tB = b.timestamp?.toDate ? b.timestamp.toDate().getTime() : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+            return tB - tA;
+          });
+        renderRecentSwipes();
+      }, () => {});
     });
   } catch (e) {}
 }
@@ -685,6 +752,7 @@ export {
   usersData,
   commandsData,
   transactionsData,
+  recentSwipesData,
   enableSimulatedMode,
   attachFirestoreListeners
 };

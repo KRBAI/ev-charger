@@ -6,6 +6,7 @@ import {
   usersData,
   commandsData,
   transactionsData,
+  recentSwipesData,
   sendRemoteStartCommand,
   sendRemoteStopCommand,
   addNewUser,
@@ -121,7 +122,18 @@ export function renderChargers() {
     const statusKey = charger.connected ? (charger.status || 'Available') : 'Disconnected';
     const cfg = STATUS_CONFIG[statusKey] || STATUS_CONFIG.Available;
     const isCharging = charger.status === 'Charging';
-    const powerKw = (charger.current_power_kw || 0).toFixed(1);
+    const powerKw = (typeof charger.current_power_kw === 'number' ? charger.current_power_kw : parseFloat(charger.current_power_kw || 0)).toFixed(1);
+    const voltageV = charger.voltage_v != null ? `${Math.round(charger.voltage_v)} V` : '—';
+    const currentA = charger.current_a != null ? `${Number(charger.current_a).toFixed(1)} A` : '—';
+
+    const vendorModel = `${charger.vendor || 'Unknown Vendor'} • ${charger.model || 'OCPP 1.6'}`;
+    const hwMeta = [
+      charger.serial_number ? `SN: ${charger.serial_number}` : null,
+      charger.firmware_version ? `FW: v${charger.firmware_version}` : null
+    ].filter(Boolean).join(' • ');
+
+    const hasSoc = charger.soc_percent != null && !isNaN(charger.soc_percent);
+    const socVal = hasSoc ? Math.min(100, Math.max(0, Math.round(charger.soc_percent))) : null;
 
     return `
       <div class="group relative bg-slate-900/70 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 shadow-xl transition-all duration-200 hover:-translate-y-0.5 backdrop-blur-sm flex flex-col justify-between">
@@ -133,7 +145,8 @@ export function renderChargers() {
                 <span class="inline-block w-2.5 h-2.5 rounded-full ${cfg.dot}"></span>
                 <h3 class="font-bold text-white text-base tracking-wide">${charger.id}</h3>
               </div>
-              <p class="text-xs text-slate-400 mt-0.5">${charger.vendor || 'Unknown Vendor'} • ${charger.model || 'OCPP 1.6'}</p>
+              <p class="text-xs text-slate-400 mt-0.5">${vendorModel}</p>
+              ${hwMeta ? `<p class="text-[11px] font-mono text-slate-500 mt-0.5 tracking-tight truncate">${hwMeta}</p>` : ''}
             </div>
             
             <span class="px-2.5 py-1 text-xs font-semibold rounded-full border ${cfg.badge}">
@@ -141,27 +154,47 @@ export function renderChargers() {
             </span>
           </div>
 
-          <!-- Metrics Row -->
-          <div class="grid grid-cols-2 gap-3 mt-4 py-3 px-3.5 bg-slate-950/60 rounded-xl border border-slate-800/80">
+          <!-- Real-Time Electrical Telemetry Row -->
+          <div class="grid grid-cols-3 gap-2 mt-4 py-2.5 px-3 bg-slate-950/60 rounded-xl border border-slate-800/80 text-center">
             <div>
-              <span class="text-[11px] uppercase tracking-wider text-slate-400 block font-medium">Power Output</span>
-              <span class="text-base font-bold ${isCharging ? 'text-amber-400 font-mono' : 'text-slate-300 font-mono'}">
-                ${isCharging ? powerKw + ' kW' : '0.0 kW'}
+              <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-medium">Power</span>
+              <span class="text-sm font-bold ${isCharging || parseFloat(powerKw) > 0 ? 'text-amber-400 font-mono' : 'text-slate-300 font-mono'}">
+                ${powerKw} kW
               </span>
             </div>
             <div>
-              <span class="text-[11px] uppercase tracking-wider text-slate-400 block font-medium">Heartbeat</span>
-              <span class="text-xs text-slate-300 font-mono">
-                ${timeAgo(charger.last_heartbeat)}
+              <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-medium">Voltage</span>
+              <span class="text-sm font-bold text-slate-200 font-mono">${voltageV}</span>
+            </div>
+            <div>
+              <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-medium">Current</span>
+              <span class="text-sm font-bold ${(isCharging || (currentA !== '—' && parseFloat(currentA) > 0)) ? 'text-cyan-400 font-mono' : 'text-slate-300 font-mono'}">
+                ${currentA}
               </span>
             </div>
           </div>
+
+          <!-- Vehicle State of Charge (SoC) Progress Bar -->
+          ${hasSoc ? `
+            <div class="mt-3 py-2 px-3 bg-slate-950/80 rounded-xl border border-slate-800">
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  Vehicle State of Charge
+                </span>
+                <span class="font-bold font-mono text-emerald-400">SoC: ${socVal}%</span>
+              </div>
+              <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div class="h-full bg-gradient-to-r from-teal-500 to-emerald-400 rounded-full transition-all duration-500" style="width: ${socVal}%"></div>
+              </div>
+            </div>
+          ` : ''}
 
           <!-- Active Session Info -->
           ${charger.active_transaction_id ? `
             <div class="mt-3 text-xs bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-lg p-2.5 flex items-center justify-between">
               <span class="font-medium">⚡ Active Tx: <strong class="font-mono text-white">${charger.active_transaction_id}</strong></span>
-              <span class="text-[11px] text-amber-200/80 font-mono">${formatTimestamp(charger.last_updated)}</span>
+              <span class="text-[11px] text-amber-200/80 font-mono">${timeAgo(charger.last_updated)}</span>
             </div>
           ` : `
             <div class="mt-3 text-xs text-slate-400 flex items-center justify-between px-1">
@@ -174,24 +207,30 @@ export function renderChargers() {
           `}
         </div>
 
-        <!-- Action Controls -->
+        <!-- Action Controls (Direct Turn ON / Turn OFF without RFID, plus Card Start) -->
         <div class="mt-5 pt-3 border-t border-slate-800/80 flex items-center gap-2">
-          ${isCharging ? `
-            <button 
-              onclick="window.handleRemoteStop('${charger.id}')"
-              class="w-full py-2 px-3 bg-rose-600/90 hover:bg-rose-500 text-white rounded-lg text-xs font-semibold tracking-wide transition shadow-lg shadow-rose-950 flex items-center justify-center gap-2">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg>
-              Remote Stop
-            </button>
-          ` : `
-            <button 
-              onclick="window.openForceStartModal('${charger.id}')"
-              ${!charger.connected ? 'disabled title="Charger is offline"' : ''}
-              class="w-full py-2 px-3 ${charger.connected ? 'bg-emerald-600/90 hover:bg-emerald-500 text-white shadow-emerald-950' : 'bg-slate-800 text-slate-400 cursor-not-allowed'} rounded-lg text-xs font-semibold tracking-wide transition shadow-lg flex items-center justify-center gap-2">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-              Force Start Tx
-            </button>
-          `}
+          <button 
+            onclick="window.handleTurnOn('${charger.id}')" 
+            ${!charger.connected ? 'disabled title="Charger offline"' : ''}
+            class="flex-1 py-2 px-2.5 ${isCharging ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/30' : (charger.connected ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950 shadow-md' : 'bg-slate-800 text-slate-500 cursor-not-allowed')} rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5"
+            title="Turn ON charger directly without RFID card">
+            <span>${isCharging ? 'Running (ON)' : 'Turn ON'}</span>
+          </button>
+
+          <button 
+            onclick="window.handleTurnOff('${charger.id}')" 
+            class="flex-1 py-2 px-2.5 ${isCharging ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950 shadow-md font-bold' : 'bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 hover:border-rose-800 text-slate-300 border border-slate-700'} rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5"
+            title="Turn OFF charger directly">
+            <span>Turn OFF</span>
+          </button>
+
+          <button 
+            onclick="window.openForceStartModal('${charger.id}')" 
+            ${!charger.connected ? 'disabled' : ''}
+            class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs transition" 
+            title="Advanced: Start with specific RFID User Card">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+          </button>
         </div>
       </div>
     `;
@@ -359,7 +398,7 @@ export function renderTransactions() {
   if (transactionsData.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" class="py-8 text-center text-xs text-slate-400">
+        <td colspan="7" class="py-8 text-center text-xs text-slate-400">
           No transactions reported yet from OCPP 1.6 StopTransaction events.
         </td>
       </tr>
@@ -369,19 +408,71 @@ export function renderTransactions() {
 
   tbody.innerHTML = transactionsData.slice(0, 10).map(tx => {
     const isOngoing = !tx.stop_time;
+    const userName = tx.user_name || '—';
+    const stopReason = tx.stop_reason || (isOngoing ? 'Charging' : 'Normal');
+
     return `
       <tr class="hover:bg-slate-800/30 transition-colors border-b border-slate-800/60 font-mono text-xs">
         <td class="py-2.5 px-3 text-slate-200 font-semibold">${tx.id || 'TX-Auto'}</td>
         <td class="py-2.5 px-3 text-slate-300">${tx.charger_id}</td>
-        <td class="py-2.5 px-3 text-cyan-300">${tx.id_tag}</td>
-        <td class="py-2.5 px-3 text-slate-300">${(tx.total_kwh || 0).toFixed(2)} kWh</td>
+        <td class="py-2.5 px-3 font-sans text-slate-200 font-medium">${userName}</td>
+        <td class="py-2.5 px-3 text-cyan-300">${tx.id_tag || '—'}</td>
+        <td class="py-2.5 px-3 text-slate-300 font-bold">${(tx.total_kwh || 0).toFixed(2)} kWh</td>
         <td class="py-2.5 px-3">
-          <span class="px-2 py-0.5 rounded text-[11px] font-semibold ${isOngoing ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'}">
-            ${isOngoing ? 'Charging' : 'Completed'}
+          <span class="px-2 py-0.5 rounded text-[10px] font-semibold ${isOngoing ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' : 'bg-slate-800 text-slate-300 border border-slate-700'}">
+            ${stopReason}
           </span>
         </td>
-        <td class="py-2.5 px-3 text-slate-400 text-right">${formatTimestamp(tx.start_time)}</td>
+        <td class="py-2.5 px-3 text-slate-400 text-right">${timeAgo(tx.start_time)}</td>
       </tr>
+    `;
+  }).join('');
+}
+
+// -------------------------------------------------------------
+// Render Recent Unknown Swipes
+// -------------------------------------------------------------
+export function renderRecentSwipes() {
+  const container = document.getElementById('recent-swipes-list');
+  const countBadge = document.getElementById('swipes-count-badge');
+  if (!container) return;
+
+  if (countBadge) countBadge.textContent = `${recentSwipesData.length} Tapped`;
+
+  if (recentSwipesData.length === 0) {
+    container.innerHTML = `
+      <div class="py-5 px-3 rounded-xl border border-dashed border-slate-800 bg-slate-950/40 text-center">
+        <div class="text-xs text-slate-400 font-medium">Awaiting Card Swipes</div>
+        <p class="text-[11px] text-slate-500 mt-0.5">Swipe an unknown RFID tag at any EVSE to capture its UID here in real-time.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = recentSwipesData.slice(0, 8).map(swipe => {
+    const tag = swipe.rfid_tag || 'UNKNOWN';
+    const charger = swipe.charger_id || 'EVSE';
+    const timeStr = timeAgo(swipe.timestamp);
+
+    return `
+      <div class="flex items-center justify-between gap-2.5 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-slate-700 transition">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1.5">
+            <span class="font-mono font-bold text-xs text-cyan-300 tracking-wide select-all">${tag}</span>
+            <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700 font-mono truncate max-w-[110px]" title="${charger}">
+              ${charger}
+            </span>
+          </div>
+          <div class="text-[10px] text-slate-400 mt-0.5 font-mono">${timeStr}</div>
+        </div>
+
+        <button 
+          onclick="window.autofillRfidTag('${tag}')" 
+          title="Auto-fill into form"
+          class="shrink-0 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold tracking-wide transition shadow shadow-emerald-950 flex items-center gap-1">
+          1-Click Register
+        </button>
+      </div>
     `;
   }).join('');
 }
@@ -394,7 +485,12 @@ export function renderStats() {
   const onlineChargersCount = chargersData.filter(c => c.connected).length;
   const activeUsersCount = usersData.filter(u => u.is_active).length;
   
-  const totalPowerNow = chargersData.reduce((acc, c) => acc + (c.status === 'Charging' ? (c.current_power_kw || 0) : 0), 0);
+  // Aggregate live current_power_kw across chargers in "Charging" state
+  const totalPowerNow = chargersData.reduce((acc, c) => {
+    const isCharging = c.status === 'Charging';
+    const pwr = typeof c.current_power_kw === 'number' ? c.current_power_kw : (parseFloat(c.current_power_kw) || 0);
+    return acc + (isCharging ? pwr : 0);
+  }, 0);
   const totalEnergyKwh = transactionsData.reduce((acc, t) => acc + (t.total_kwh || 0), 0);
 
   const elActive = document.getElementById('stat-active-chargers');
@@ -550,6 +646,37 @@ window.closePythonHelperModal = function() {
   if (modal) modal.classList.add('hidden');
 };
 
+window.handleTurnOn = async function(chargerId) {
+  await sendRemoteStartCommand(chargerId, "NO_RFID");
+};
+
+window.handleTurnOff = async function(chargerId) {
+  await sendRemoteStopCommand(chargerId);
+};
+
+window.autofillRfidTag = function(tag) {
+  const rfidInput = document.getElementById('user-rfid');
+  const nameInput = document.getElementById('user-name');
+  const formPanel = document.getElementById('issue-card-panel');
+  if (!rfidInput) return;
+
+  rfidInput.value = tag;
+  showToast(`Auto-filled RFID Tag ${tag}! Enter cardholder name.`, 'info');
+
+  rfidInput.classList.add('ring-2', 'ring-cyan-400', 'bg-cyan-950/40');
+  setTimeout(() => {
+    rfidInput.classList.remove('ring-2', 'ring-cyan-400', 'bg-cyan-950/40');
+  }, 1200);
+
+  if (nameInput) {
+    nameInput.focus();
+  }
+
+  if (formPanel) {
+    formPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+};
+
 window.seedData = async function() {
   await seedInitialFirestoreData();
 };
@@ -560,5 +687,6 @@ registerUIRenderers({
   renderUsers,
   renderCommands,
   renderTransactions,
+  renderRecentSwipes,
   renderStats
 });

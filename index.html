@@ -253,8 +253,8 @@
       <!-- 3. Remote Commands & Transactions -->
       <section class="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-4">
         
-        <!-- Commands Log (7 cols) -->
-        <div class="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow-xl backdrop-blur-md">
+        <!-- Commands Log (6 cols) -->
+        <div class="lg:col-span-6 bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow-xl backdrop-blur-md">
           <div class="flex items-center justify-between pb-3 border-b border-slate-800">
             <div>
               <h3 class="text-base font-bold text-white flex items-center gap-2">
@@ -284,15 +284,15 @@
           </div>
         </div>
 
-        <!-- Transactions Log (5 cols) -->
-        <div class="lg:col-span-5 bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow-xl backdrop-blur-md">
+        <!-- Transactions Log (6 cols) -->
+        <div class="lg:col-span-6 bg-slate-900/70 border border-slate-800 rounded-2xl p-5 shadow-xl backdrop-blur-md">
           <div class="flex items-center justify-between pb-3 border-b border-slate-800">
             <div>
               <h3 class="text-base font-bold text-white flex items-center gap-2">
                 <i data-lucide="activity" class="w-4 h-4 text-purple-400"></i>
                 Energy Transactions
               </h3>
-              <p class="text-xs text-slate-400 mt-0.5">Firestore <code class="text-purple-400">Transactions</code> collection.</p>
+              <p class="text-xs text-slate-400 mt-0.5">Enriched Firestore <code class="text-purple-400">Transactions</code> session telemetry.</p>
             </div>
           </div>
 
@@ -302,8 +302,10 @@
                 <tr class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 border-b border-slate-800">
                   <th class="pb-2 px-3">Tx ID</th>
                   <th class="pb-2 px-3">EVSE</th>
+                  <th class="pb-2 px-3">User Name</th>
                   <th class="pb-2 px-3">Tag</th>
                   <th class="pb-2 px-3">Energy</th>
+                  <th class="pb-2 px-3">Stop Reason</th>
                   <th class="pb-2 px-3 text-right">Time</th>
                 </tr>
               </thead>
@@ -591,7 +593,18 @@ db.collection("Commands").where("status", "==", "PENDING").on_snapshot(on_cmd_sn
           const statusKey = c.connected ? (c.status || 'Available') : 'Disconnected';
           const cfg = STATUS_CONFIG[statusKey] || STATUS_CONFIG.Available;
           const isCharging = c.status === 'Charging';
-          const pwr = (c.current_power_kw || 0).toFixed(1);
+          const powerKw = (typeof c.current_power_kw === 'number' ? c.current_power_kw : parseFloat(c.current_power_kw || 0)).toFixed(1);
+          const voltageV = c.voltage_v != null ? `${Math.round(c.voltage_v)} V` : '—';
+          const currentA = c.current_a != null ? `${Number(c.current_a).toFixed(1)} A` : '—';
+
+          const vendorModel = `${c.vendor || 'EVSE'} • ${c.model || 'OCPP 1.6'}`;
+          const hwMeta = [
+            c.serial_number ? `SN: ${c.serial_number}` : null,
+            c.firmware_version ? `FW: v${c.firmware_version}` : null
+          ].filter(Boolean).join(' • ');
+
+          const hasSoc = c.soc_percent != null && !isNaN(c.soc_percent);
+          const socVal = hasSoc ? Math.min(100, Math.max(0, Math.round(c.soc_percent))) : null;
 
           return `
             <div class="bg-slate-900/70 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 shadow-xl transition backdrop-blur-sm flex flex-col justify-between">
@@ -602,25 +615,49 @@ db.collection("Commands").where("status", "==", "PENDING").on_snapshot(on_cmd_sn
                       <span class="w-2.5 h-2.5 rounded-full ${cfg.dot}"></span>
                       <h3 class="font-bold text-white text-base font-mono">${c.id}</h3>
                     </div>
-                    <p class="text-xs text-slate-400 mt-0.5">${c.vendor || 'EVSE'} • ${c.model || 'OCPP 1.6'}</p>
+                    <p class="text-xs text-slate-400 mt-0.5">${vendorModel}</p>
+                    ${hwMeta ? `<p class="text-[11px] font-mono text-slate-500 mt-0.5 tracking-tight truncate">${hwMeta}</p>` : ''}
                   </div>
                   <span class="px-2.5 py-1 text-xs font-semibold rounded-full border ${cfg.badge}">
                     ${statusKey}
                   </span>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 mt-4 py-3 px-3.5 bg-slate-950/60 rounded-xl border border-slate-800/80">
+                <!-- Real-Time Electrical Telemetry Row -->
+                <div class="grid grid-cols-3 gap-2 mt-4 py-2.5 px-3 bg-slate-950/60 rounded-xl border border-slate-800/80 text-center">
                   <div>
-                    <span class="text-[11px] uppercase tracking-wider text-slate-400 block font-medium">Power Output</span>
-                    <span class="text-base font-bold ${isCharging ? 'text-amber-400 font-mono' : 'text-slate-300 font-mono'}">
-                      ${isCharging ? pwr + ' kW' : '0.0 kW'}
+                    <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-medium">Power</span>
+                    <span class="text-sm font-bold ${isCharging || parseFloat(powerKw) > 0 ? 'text-amber-400 font-mono' : 'text-slate-300 font-mono'}">
+                      ${powerKw} kW
                     </span>
                   </div>
                   <div>
-                    <span class="text-[11px] uppercase tracking-wider text-slate-400 block font-medium">Heartbeat</span>
-                    <span class="text-xs text-slate-300 font-mono">${timeAgo(c.last_heartbeat)}</span>
+                    <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-medium">Voltage</span>
+                    <span class="text-sm font-bold text-slate-200 font-mono">${voltageV}</span>
+                  </div>
+                  <div>
+                    <span class="text-[10px] uppercase tracking-wider text-slate-400 block font-medium">Current</span>
+                    <span class="text-sm font-bold ${(isCharging || (currentA !== '—' && parseFloat(currentA) > 0)) ? 'text-cyan-400 font-mono' : 'text-slate-300 font-mono'}">
+                      ${currentA}
+                    </span>
                   </div>
                 </div>
+
+                <!-- Vehicle State of Charge (SoC) Progress Bar -->
+                ${hasSoc ? `
+                  <div class="mt-3 py-2 px-3 bg-slate-950/80 rounded-xl border border-slate-800">
+                    <div class="flex items-center justify-between text-xs mb-1">
+                      <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                        <i data-lucide="battery-charging" class="w-3.5 h-3.5 text-emerald-400"></i>
+                        Vehicle State of Charge
+                      </span>
+                      <span class="font-bold font-mono text-emerald-400">SoC: ${socVal}%</span>
+                    </div>
+                    <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <div class="h-full bg-gradient-to-r from-teal-500 to-emerald-400 rounded-full transition-all duration-500" style="width: ${socVal}%"></div>
+                    </div>
+                  </div>
+                ` : ''}
 
                 ${c.active_transaction_id ? `
                   <div class="mt-3 text-xs bg-amber-500/10 border border-amber-500/20 text-amber-300 rounded-lg p-2 flex items-center justify-between font-mono">
@@ -755,19 +792,31 @@ db.collection("Commands").where("status", "==", "PENDING").on_snapshot(on_cmd_sn
         if (!tbody) return;
 
         if (transactions.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-xs text-slate-400">No completed sessions in Firestore <code class="text-purple-400">Transactions</code> collection.</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-xs text-slate-400">No completed sessions in Firestore <code class="text-purple-400">Transactions</code> collection.</td></tr>`;
           return;
         }
 
-        tbody.innerHTML = transactions.slice(0, 10).map(tx => `
-          <tr class="hover:bg-slate-800/30 border-b border-slate-800/60 font-mono text-xs">
-            <td class="py-2.5 px-3 text-slate-200">${tx.id || 'TX'}</td>
-            <td class="py-2.5 px-3 text-slate-300">${tx.charger_id}</td>
-            <td class="py-2.5 px-3 text-cyan-300">${tx.id_tag || '—'}</td>
-            <td class="py-2.5 px-3 text-slate-200">${(tx.total_kwh || 0).toFixed(2)} kWh</td>
-            <td class="py-2.5 px-3 text-slate-400 text-right">${timeAgo(tx.start_time)}</td>
-          </tr>
-        `).join('');
+        tbody.innerHTML = transactions.slice(0, 10).map(tx => {
+          const isOngoing = !tx.stop_time;
+          const userName = tx.user_name || '—';
+          const stopReason = tx.stop_reason || (isOngoing ? 'Charging' : 'Normal');
+
+          return `
+            <tr class="hover:bg-slate-800/30 border-b border-slate-800/60 font-mono text-xs">
+              <td class="py-2.5 px-3 text-slate-200">${tx.id || 'TX'}</td>
+              <td class="py-2.5 px-3 text-slate-300">${tx.charger_id}</td>
+              <td class="py-2.5 px-3 font-sans text-slate-200 font-medium">${userName}</td>
+              <td class="py-2.5 px-3 text-cyan-300">${tx.id_tag || '—'}</td>
+              <td class="py-2.5 px-3 text-slate-200 font-bold">${(tx.total_kwh || 0).toFixed(2)} kWh</td>
+              <td class="py-2.5 px-3">
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold ${isOngoing ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' : 'bg-slate-800 text-slate-300 border border-slate-700'}">
+                  ${stopReason}
+                </span>
+              </td>
+              <td class="py-2.5 px-3 text-slate-400 text-right">${timeAgo(tx.start_time)}</td>
+            </tr>
+          `;
+        }).join('');
       }
 
       function renderRecentSwipes() {
@@ -814,7 +863,7 @@ db.collection("Commands").where("status", "==", "PENDING").on_snapshot(on_cmd_sn
                 title="Auto-fill into form"
                 class="shrink-0 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold tracking-wide transition shadow shadow-emerald-950 flex items-center gap-1">
                 <i data-lucide="arrow-down-to-line" class="w-3 h-3"></i>
-                Register
+                1-Click Register
               </button>
             </div>
           `;
@@ -827,7 +876,13 @@ db.collection("Commands").where("status", "==", "PENDING").on_snapshot(on_cmd_sn
         const activeCount = chargers.filter(c => c.status === 'Charging').length;
         const onlineCount = chargers.filter(c => c.connected).length;
         const activeUsersCount = users.filter(u => u.is_active).length;
-        const totalPwr = chargers.reduce((sum, c) => sum + (c.status === 'Charging' ? (c.current_power_kw || 0) : 0), 0);
+        
+        // Aggregate live current_power_kw across all chargers in "Charging" state
+        const totalPwr = chargers.reduce((sum, c) => {
+          const isCharging = c.status === 'Charging';
+          const pwr = typeof c.current_power_kw === 'number' ? c.current_power_kw : (parseFloat(c.current_power_kw) || 0);
+          return sum + (isCharging ? pwr : 0);
+        }, 0);
         const totalEnergy = transactions.reduce((sum, t) => sum + (t.total_kwh || 0), 0);
 
         const elOnline = document.getElementById('stat-online-chargers');
